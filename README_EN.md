@@ -160,6 +160,70 @@ After installation, Antigravity will automatically recognize Dynamo-related requ
     - **Manual Start (Python)**: `python bridge/python/server.py`
     - **Node.js Bridge**: Switched/Started automatically by the AI Client.
 
+### Revit to Dynamo Version Mapping
+
+> The table below reflects current deployment and validation in this project. Always verify the actual Dynamo version installed on each machine before testing.
+
+| Revit Version | Dynamo Revit Version | Status |
+|---|---|---|
+| 2020 | 2.3.0.5885 | Verified (core smoke) |
+| 2021 | 2.6.1.8786 | Verified (core smoke) |
+| 2022 | 2.10.1.3976 | Verified (core smoke) |
+| 2023 | 2.13.1.3887 | Verified (core smoke) |
+| 2024 | 2.19.3.6394 | Verified (core/advanced/python smoke) |
+| 2025 | 3.0.3.7597 | Verified (core smoke) |
+| 2026 | 3.4.1.7055 | Verified (core smoke) |
+| 2027 | 4.0.2.3852 | Verified (core smoke) |
+
+### 2020-2027 Test Summary
+
+| Revit Version | Core Smoke (analyze -> clear -> execute -> analyze) | Advanced Smoke | Summary |
+|---|---|---|---|
+| 2020 | Passed | Not executed | Connection and Code Block creation are stable |
+| 2021 | Passed | Not executed | Connection and Code Block creation are stable |
+| 2022 | Passed | Not executed | Connection and Code Block creation are stable |
+| 2023 | Passed | Not executed | Connection and Code Block creation are stable |
+| 2024 | Passed | Passed | 2-point/1-line and Python Script pipeline verified |
+| 2025 | Passed | Not executed | Connection and Code Block creation are stable |
+| 2026 | Passed | Not executed | Connection and Code Block creation are stable |
+| 2027 | Passed | Not executed | Restored after fixing 27.0 deployment path mapping |
+
+### Multi-version Installation Strategy
+
+To avoid assuming every user has Revit 2020-2027 installed, use two modes:
+
+1. Full matrix mode (maintainers/regression): validate all versions 2020-2027.
+2. Detected-install mode (most users): deploy only versions detected on the local machine.
+
+Common commands:
+
+```powershell
+# Detected-install mode: deploy.ps1 auto-selects locally installed versions
+./deploy.ps1
+
+# Single target version (example: 2027)
+./deploy.ps1 -TargetDynamoVersions 4.0
+```
+
+For a reusable low-token installation flow, see:
+
+- [`docs/revit-2020-2027-install-test-plan.md`](docs/revit-2020-2027-install-test-plan.md), sections "4.5 One-page Quick Install Guide" and "4.6 Low-Token Interaction Template".
+
+### Cautions
+
+1. Revit 2027 actually uses `%AppData%\\Dynamo\\Dynamo Revit\\27.0`, not `4.0`.
+2. Dynamo 4.x build requires .NET 10 SDK; without it, 2027 deployment cannot build updated DLLs.
+3. Always close Revit/Dynamo before redeploying to avoid DLL file lock issues.
+4. Opening Dynamo UI does not guarantee MCP is connected; verify with `active_sessions > 0` in `get_server_stats`.
+5. If package files are updated but UI does not reflect changes, close and reopen the Dynamo window once.
+
+Quick local check:
+
+```powershell
+Get-ChildItem "C:\Program Files\Autodesk" -Directory | Where-Object { $_.Name -like "Revit *" }
+Get-ChildItem "$env:AppData\Dynamo\Dynamo Revit" -Directory
+```
+
 ---
 
 ## 🔥 Core Operational Tools (AI Tools)

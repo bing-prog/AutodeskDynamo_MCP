@@ -7,16 +7,19 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Dynamo.ViewModels;
+using System.Windows.Threading;
 
 namespace DynamoMCPListener
 {
     [Autodesk.DesignScript.Runtime.IsVisibleInDynamoLibrary(false)]
     public class WebSocketClient : IDisposable
     {
+        private const string BuildMarker = "WebSocketClient-2026-05-29-status-guard-v2";
         private ClientWebSocket _ws;
         private readonly Uri _serverUri;
         private readonly DynamoViewModel _vm;
         private readonly GraphHandler _handler;
+        private readonly Dispatcher _uiDispatcher;
         private readonly string _sessionId;
         private CancellationTokenSource _cts;
 
@@ -28,10 +31,20 @@ namespace DynamoMCPListener
             _sessionId = sessionId;
             _serverUri = new Uri(MCPConfig.WebSocketUrl);
             _handler = new GraphHandler(vm, sessionId);
+            _uiDispatcher = Dispatcher.CurrentDispatcher;
+            MCPLogger.Info($"[WS] Initialized marker={BuildMarker} session={_sessionId}");
 
             // 訂閱事件以監控 Start 節點狀態
-            _vm.Model.CurrentWorkspace.NodeAdded += (n) => _ = ReportStatus();
-            _vm.Model.CurrentWorkspace.NodeRemoved += (n) => _ = ReportStatus();
+            var workspace = _vm.Model.CurrentWorkspace;
+            if (workspace != null)
+            {
+                workspace.NodeAdded += (n) => _ = ReportStatus();
+                workspace.NodeRemoved += (n) => _ = ReportStatus();
+            }
+            else
+            {
+                MCPLogger.Warning($"[WS] CurrentWorkspace is null during initialization. marker={BuildMarker}");
+            }
         }
 
         public async Task StartAsync()
@@ -76,11 +89,12 @@ namespace DynamoMCPListener
 
         private async Task SendHandshake()
         {
+            var ws = _vm.Model.CurrentWorkspace;
             var handshake = new
             {
                 action = "handshake",
                 sessionId = _sessionId,
-                fileName = _vm.Model.CurrentWorkspace.FileName ?? "Home",
+                fileName = ws?.FileName ?? "Home",
                 processId = System.Diagnostics.Process.GetCurrentProcess().Id
             };
             await SendMessageAsync(JsonConvert.SerializeObject(handshake));
@@ -119,6 +133,7 @@ namespace DynamoMCPListener
             try
             {
                 MCPLogger.Info($"[WS] Received command: {json.Substring(0, Math.Min(json.Length, 100))}...");
+                MCPLogger.Info($"[WS] Dispatch marker={BuildMarker}");
                 
                 string response = "";
 
@@ -126,11 +141,19 @@ namespace DynamoMCPListener
                 // No need to check for StartMCPServer node
 
                 // Ensure executing on UI Thread
-                // Use System.Windows.Application.Current.Dispatcher since we are in a WPF context (Dynamo)
-                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => 
+                var dispatcher = ResolveDispatcher();
+                if (dispatcher != null)
                 {
-                     response = _handler.HandleCommand(json);
-                });
+                    await dispatcher.InvokeAsync(() =>
+                    {
+                        response = _handler.HandleCommand(json);
+                    });
+                }
+                else
+                {
+                    MCPLogger.Warning($"[WS] Dispatcher unavailable, fallback to direct execution. marker={BuildMarker}");
+                    response = _handler.HandleCommand(json);
+                }
 
                 await SendMessageAsync(response);
             }
@@ -142,6 +165,44 @@ namespace DynamoMCPListener
                      await SendMessageAsync($"{{\"error\": \"Processing error: {ex.Message}\"}}");
                 } catch {}
             }
+        }
+
+        private Dispatcher ResolveDispatcher()
+        {
+            // Primary path in WPF host; may be null in some Dynamo/Revit embedding scenarios.
+            if (_uiDispatcher != null)
+            {
+                return _uiDispatcher;
+            }
+
+            var appDispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (appDispatcher != null)
+            {
+                return appDispatcher;
+            }
+
+            try
+            {
+                var vmType = _vm.GetType();
+                var uiDispatcherProp = vmType.GetProperty("UIDispatcher") ?? vmType.GetProperty("Dispatcher");
+                var candidate = uiDispatcherProp?.GetValue(_vm);
+                if (candidate is Dispatcher d)
+                {
+                    return d;
+                }
+
+                var nestedDispatcher = candidate?.GetType().GetProperty("Dispatcher")?.GetValue(candidate);
+                if (nestedDispatcher is Dispatcher nd)
+                {
+                    return nd;
+                }
+            }
+            catch (Exception ex)
+            {
+                MCPLogger.Warning($"[WS] ResolveDispatcher failed: {ex.Message}");
+            }
+
+            return null;
         }
 
         private async Task SendMessageAsync(string message)

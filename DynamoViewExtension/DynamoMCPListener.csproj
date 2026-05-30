@@ -1,19 +1,29 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFrameworks>net48;net8.0-windows;net10.0-windows</TargetFrameworks>
     <AssemblyName>DynamoMCPListener</AssemblyName>
     <UseWPF>true</UseWPF>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <DynamoPackageVersion Condition="'$(DynamoPackageVersion)' == '' and '$(TargetFramework)' == 'net8.0-windows'">3.4.1.7055</DynamoPackageVersion>
+    <DynamoPackageVersion Condition="'$(DynamoPackageVersion)' == '' and '$(TargetFramework)' == 'net10.0-windows'">4.0.2.3852</DynamoPackageVersion>
+    <DynamoPackageVersion Condition="'$(DynamoPackageVersion)' == '' and '$(TargetFramework)' != 'net8.0-windows'">2.19.3.6394</DynamoPackageVersion>
+    <AppendTargetFrameworkToOutputPath Condition="'$(CustomOutputSubdir)' == ''">true</AppendTargetFrameworkToOutputPath>
+    <AppendTargetFrameworkToOutputPath Condition="'$(CustomOutputSubdir)' != ''">false</AppendTargetFrameworkToOutputPath>
+    <OutputPath Condition="'$(CustomOutputSubdir)' != ''">bin\$(Configuration)\$(CustomOutputSubdir)\</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DynamoVisualProgramming.Core" Version="3.0.0.7961" ExcludeAssets="runtime" />
-    <PackageReference Include="DynamoVisualProgramming.DynamoServices" Version="3.0.0.7961" />
-    <PackageReference Include="DynamoVisualProgramming.WpfUILibrary" Version="3.0.0.7961" ExcludeAssets="runtime" />
+    <PackageReference Include="DynamoVisualProgramming.Core" Version="$(DynamoPackageVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="DynamoVisualProgramming.DynamoServices" Version="$(DynamoPackageVersion)" />
+    <PackageReference Include="DynamoVisualProgramming.WpfUILibrary" Version="$(DynamoPackageVersion)" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="all" Condition="'$(TargetFramework)' == 'net48'" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
 
 

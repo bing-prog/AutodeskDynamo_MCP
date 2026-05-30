@@ -142,6 +142,8 @@ graph LR
 | **v5.1** | Auto Documentation, Player Smart Packaging | 📋 Pending |
 | **v6.0** | Multi-Agent Collaboration Ecosystem | 💭 Vision |
 
+Note: The current mainline remains v3.2. Cross-version Revit (2020-2027) installation and deployment coverage is currently documented as guidance and process updates, and will be promoted into formal milestones as implementation matures.
+
 **Status Legend:**
 - ✅ Completed
 - 🔄 Planning

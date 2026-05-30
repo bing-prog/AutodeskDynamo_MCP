@@ -7,6 +7,19 @@ This guide helps AI agents efficiently automate Autodesk Dynamo through the Mode
 
 ---
 
+## Skill Routing
+
+當任務主軸是「安裝 / 部署 MCP 到 Revit 版本」時，優先使用：
+
+- `.skills/autodesk-dynamo-mcp-installation/SKILL.md`
+- 驗證方式請參考：`docs/ai-guide/installation-skill-validation.md`
+
+當任務主軸是「建立節點 / 連線 / Python 注入 / 圖形自動化」時，使用：
+
+- `.skills/dynamo-automation/SKILL.md`
+
+---
+
 ## Prerequisites
 
 1. **MCP Connection Established**

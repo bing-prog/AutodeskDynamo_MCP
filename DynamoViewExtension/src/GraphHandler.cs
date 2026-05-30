@@ -12,12 +12,14 @@ using Dynamo.Search;
 using Dynamo.Search.SearchElements;
 using Dynamo.Graph.Nodes.CustomNodes;
 using Dynamo.Graph.Annotations;
+using Dynamo.Graph.Workspaces;
 
 namespace DynamoMCPListener
 {
     [Autodesk.DesignScript.Runtime.IsVisibleInDynamoLibrary(false)]
     public class GraphHandler
     {
+        private const string BuildMarker = "GraphHandler-2026-05-29-status-guard-v2";
         private DynamoViewModel _vm;
         private DynamoModel _dynamoModel;
         private JArray _commonNodesCache;
@@ -30,6 +32,7 @@ namespace DynamoMCPListener
             _dynamoModel = vm.Model;
             _sessionId = sessionId;
             _nodeIdMap = new Dictionary<string, Guid>();
+            MCPLogger.Info($"[GraphHandler] Initialized marker={BuildMarker} session={_sessionId}");
         }
 
         public string HandleCommand(string jsonLine)
@@ -41,10 +44,37 @@ namespace DynamoMCPListener
 
                 // 0. Handle Actions (like clear_graph)
                 string action = data["action"]?.ToString();
+                if (string.IsNullOrWhiteSpace(action))
+                {
+                    MCPLogger.Info($"[GraphHandler] Non-action payload marker={BuildMarker}: {jsonLine}");
+                    if (data["status"] != null || data["sessionId"] != null)
+                    {
+                        return "{\"status\": \"ok\", \"message\": \"status acknowledged\"}";
+                    }
+
+                    // Backward compatibility: execute_dynamo_instructions sends payload with
+                    // nodes/connectors but without an explicit action field.
+                    if (data["nodes"] != null || data["connectors"] != null)
+                    {
+                        action = "legacy_execute";
+                    }
+                    else
+                    {
+                        return "{\"status\": \"ignored\", \"message\": \"Missing action\"}";
+                    }
+                }
+
                 if (action == "clear_graph")
                 {
                     // This must be run on UI thread, handled by WebSocketClient dispatcher
-                    var nodesToDelete = _dynamoModel.CurrentWorkspace.Nodes.Select(n => n.GUID).ToList();
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        _nodeIdMap.Clear();
+                        return "{\"status\": \"ok\", \"message\": \"Workspace already empty\"}";
+                    }
+
+                    var nodesToDelete = workspace.Nodes.Select(n => n.GUID).ToList();
                     if (nodesToDelete.Any())
                     {
                         _dynamoModel.ExecuteCommand(new DynamoModel.DeleteModelCommand(nodesToDelete));
@@ -56,7 +86,31 @@ namespace DynamoMCPListener
 
                 if (action == "get_graph_status")
                 {
-                    var nodes = _dynamoModel.CurrentWorkspace.Nodes.Select(n => new
+                    MCPLogger.Info($"[GraphHandler] get_graph_status marker={BuildMarker}");
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        var emptyStatusData = new
+                        {
+                            sessionId = _sessionId,
+                            processId = System.Diagnostics.Process.GetCurrentProcess().Id,
+                            workspace = new
+                            {
+                                name = "Home",
+                                fileName = ""
+                            },
+                            workspaceName = "Home",
+                            nodeCount = 0,
+                            connectorCount = 0,
+                            nodes = new object[0],
+                            connectors = new object[0],
+                            warning = "目前尚未開啟可分析的 Dynamo 工作區。"
+                        };
+
+                        return JsonConvert.SerializeObject(emptyStatusData);
+                    }
+
+                    var nodes = workspace.Nodes.Select(n => new
                     {
                         id = n.GUID.ToString(),
                         name = n.Name,
@@ -66,22 +120,25 @@ namespace DynamoMCPListener
                         y = n.Y
                     }).ToList();
 
-                    var connectors = _dynamoModel.CurrentWorkspace.Connectors.Select(c => new
-                    {
-                        from = c.Start.Owner.GUID.ToString(),
-                        to = c.End.Owner.GUID.ToString(),
-                        fromPort = c.Start.Index,
-                        toPort = c.End.Index
-                    }).ToList();
+                    var connectors = workspace.Connectors
+                        .Where(c => c?.Start?.Owner != null && c?.End?.Owner != null)
+                        .Select(c => new
+                        {
+                            from = c.Start.Owner.GUID.ToString(),
+                            to = c.End.Owner.GUID.ToString(),
+                            fromPort = c.Start.Index,
+                            toPort = c.End.Index
+                        }).ToList();
 
                     var statusData = new
                     {
                         sessionId = _sessionId,
                         processId = System.Diagnostics.Process.GetCurrentProcess().Id,
                         workspace = new {
-                            name = _dynamoModel.CurrentWorkspace.Name,
-                            fileName = _dynamoModel.CurrentWorkspace.FileName
+                            name = workspace.Name,
+                            fileName = workspace.FileName
                         },
+                        workspaceName = workspace.Name,
                         nodeCount = nodes.Count,
                         connectorCount = connectors.Count,
                         nodes = nodes,
@@ -105,7 +162,13 @@ namespace DynamoMCPListener
                 // === MCP Resources Layer: Structured Data Queries ===
                 if (action == "get_nodes_structured")
                 {
-                    var nodes = _dynamoModel.CurrentWorkspace.Nodes.Select(n => {
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        return WorkspaceUnavailableError(action);
+                    }
+
+                    var nodes = workspace.Nodes.Select(n => {
                         string stateStr = "Active";
                         try { stateStr = n.State.ToString(); } catch { }
                         return new
@@ -137,7 +200,15 @@ namespace DynamoMCPListener
 
                 if (action == "get_connectors_structured")
                 {
-                    var connectors = _dynamoModel.CurrentWorkspace.Connectors.Select(c => new
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        return WorkspaceUnavailableError(action);
+                    }
+
+                    var connectors = workspace.Connectors
+                        .Where(c => c?.Start?.Owner != null && c?.End?.Owner != null)
+                        .Select(c => new
                     {
                         from = c.Start.Owner.GUID.ToString(),
                         to = c.End.Owner.GUID.ToString(),
@@ -152,7 +223,13 @@ namespace DynamoMCPListener
 
                 if (action == "get_selection")
                 {
-                    var selected = _dynamoModel.CurrentWorkspace.Nodes
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        return WorkspaceUnavailableError(action);
+                    }
+
+                    var selected = workspace.Nodes
                         .Where(n => n.IsSelected)
                         .Select(n => new
                         {
@@ -167,7 +244,13 @@ namespace DynamoMCPListener
 
                 if (action == "get_error_nodes")
                 {
-                    var errorNodes = _dynamoModel.CurrentWorkspace.Nodes
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        return WorkspaceUnavailableError(action);
+                    }
+
+                    var errorNodes = workspace.Nodes
                         .Where(n => {
                             try {
                                 string s = n.State.ToString();
@@ -191,6 +274,12 @@ namespace DynamoMCPListener
 
                 if (action == "get_node_details")
                 {
+                    var workspace = GetWorkspace();
+                    if (workspace == null)
+                    {
+                        return WorkspaceUnavailableError(action);
+                    }
+
                     string targetId = data["nodeId"]?.ToString();
                     if (string.IsNullOrEmpty(targetId))
                     {
@@ -207,7 +296,7 @@ namespace DynamoMCPListener
                         }
                     }
 
-                    var node = _dynamoModel.CurrentWorkspace.Nodes.FirstOrDefault(n => n.GUID == targetGuid);
+                    var node = workspace.Nodes.FirstOrDefault(n => n.GUID == targetGuid);
                     if (node == null)
                     {
                         return "{\"status\": \"error\", \"message\": \"Node not found\"}";
@@ -230,7 +319,7 @@ namespace DynamoMCPListener
                             name = p.Name,
                             type = p.PortType.ToString(),
                             isConnected = p.IsConnected,
-                            connectedFrom = p.IsConnected ? _dynamoModel.CurrentWorkspace.Connectors
+                            connectedFrom = p.IsConnected ? workspace.Connectors
                                 .Where(c => c.End.Owner.GUID == node.GUID && c.End.Index == p.Index)
                                 .Select(c => c.Start.Owner.GUID.ToString())
                                 .FirstOrDefault() : null
@@ -239,7 +328,7 @@ namespace DynamoMCPListener
                         {
                             name = p.Name,
                             type = p.PortType.ToString(),
-                            connectedTo = _dynamoModel.CurrentWorkspace.Connectors
+                            connectedTo = workspace.Connectors
                                 .Where(c => c.Start.Owner.GUID == node.GUID && c.Start.Index == p.Index)
                                 .Select(c => c.End.Owner.GUID.ToString())
                                 .ToList()
@@ -449,6 +538,21 @@ namespace DynamoMCPListener
                 MCPLogger.Error($"Error executing instructions: {ex.Message}");
                 return JsonConvert.SerializeObject(new { status = "error", message = ex.Message });
             }
+        }
+
+        private WorkspaceModel GetWorkspace()
+        {
+            return _dynamoModel?.CurrentWorkspace;
+        }
+
+        private string WorkspaceUnavailableError(string action)
+        {
+            return JsonConvert.SerializeObject(new
+            {
+                status = "error",
+                action,
+                message = "目前尚未開啟可分析的 Dynamo 工作區。"
+            });
         }
 
         private void CreateNode(JToken n)
@@ -854,6 +958,30 @@ namespace DynamoMCPListener
             return JsonConvert.SerializeObject(new { status = "ok", debug = result });
         }
 
+        private DynamoModel.RecordableCommand CreateAnnotationCommandCompat(Guid annotationGuid, string title, string description, double x, double y)
+        {
+            var commandType = typeof(DynamoModel.CreateAnnotationCommand);
+            var annotationText = string.IsNullOrWhiteSpace(description)
+                ? title
+                : $"{title}{Environment.NewLine}{description}";
+
+            foreach (var ctor in commandType.GetConstructors())
+            {
+                var parameters = ctor.GetParameters();
+                if (parameters.Length == 6)
+                {
+                    return (DynamoModel.RecordableCommand)ctor.Invoke(new object[] { annotationGuid, title, description, x, y, false });
+                }
+
+                if (parameters.Length == 5)
+                {
+                    return (DynamoModel.RecordableCommand)ctor.Invoke(new object[] { annotationGuid, annotationText, x, y, false });
+                }
+            }
+
+            throw new MissingMethodException("Unsupported CreateAnnotationCommand constructor.");
+        }
+
         private void CreateGroup(JToken data)
         {
             var nodeIds = data["nodeIds"]?.ToObject<List<string>>() ?? new List<string>();
@@ -892,9 +1020,9 @@ namespace DynamoMCPListener
                 a.IsSelected = false;
 
             // Step 1: Create the annotation (group container)
-            // Correct API: CreateAnnotationCommand(Guid, string title, string description, double x, double y, bool defaultPosition)
-            _dynamoModel.ExecuteCommand(new DynamoModel.CreateAnnotationCommand(
-                annotationGuid, title, description, minX - 10, minY - 55, false));
+            var createAnnotationCommand = CreateAnnotationCommandCompat(
+                annotationGuid, title, description, minX - 10, minY - 55);
+            _dynamoModel.ExecuteCommand(createAnnotationCommand);
 
             // Step 2: Select the annotation so AddModelToGroupCommand knows the target group
             _dynamoModel.ExecuteCommand(new DynamoModel.SelectModelCommand(annotationGuid.ToString(), 0));

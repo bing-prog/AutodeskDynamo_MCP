@@ -76,8 +76,7 @@ namespace DynamoMCPListener
                 _statusItem = new MenuItem { Header = "Status: Disconnected", IsEnabled = false };
                 mcpMenu.Items.Add(_statusItem);
 
-                // Add to Dynamo Menu - Use AddExtensionMenuItem for maximum compatibility
-                p.AddExtensionMenuItem(mcpMenu);
+                AddMenuCompat(p, mcpMenu);
 
                 if (autoConnectItem.IsChecked)
                 {
@@ -91,6 +90,28 @@ namespace DynamoMCPListener
             {
                 WriteDebugLog($"Error in Loaded: {ex}");
             }
+        }
+
+        private static void AddMenuCompat(ViewLoadedParams p, MenuItem mcpMenu)
+        {
+            var paramsType = p.GetType();
+            var addExtensionMenuItem = paramsType.GetMethod("AddExtensionMenuItem", new[] { typeof(MenuItem) });
+            if (addExtensionMenuItem != null)
+            {
+                addExtensionMenuItem.Invoke(p, new object[] { mcpMenu });
+                return;
+            }
+
+            var addMenuItem = paramsType.GetMethod("AddMenuItem");
+            if (addMenuItem != null)
+            {
+                var menuBarType = addMenuItem.GetParameters()[0].ParameterType;
+                var packagesMenu = Enum.Parse(menuBarType, "Packages");
+                addMenuItem.Invoke(p, new object[] { packagesMenu, mcpMenu, -1 });
+                return;
+            }
+
+            throw new MissingMethodException("Unsupported Dynamo menu API.");
         }
 
         private void StartConnection()

@@ -161,6 +161,70 @@ Copy-Item -Recurse ".skills\dynamo-automation" `
     - **手動啟動 (Python)**: `python bridge/python/server.py`
     - **Node.js 橋接**: 由 AI Client 自動啟動。
 
+### Revit 與 Dynamo 版本對應
+
+> 以下為本專案目前部署與實測使用的對應。跨版本測試時請先確認目標機器實際安裝版本。
+
+| Revit 版本 | 對應 Dynamo Revit 版本 | 狀態 |
+|---|---|---|
+| 2020 | 2.3.0.5885 | 已驗證（核心冒煙） |
+| 2021 | 2.6.1.8786 | 已驗證（核心冒煙） |
+| 2022 | 2.10.1.3976 | 已驗證（核心冒煙） |
+| 2023 | 2.13.1.3887 | 已驗證（核心冒煙） |
+| 2024 | 2.19.3.6394 | 已驗證（核心/進階/Python 冒煙） |
+| 2025 | 3.0.3.7597 | 已驗證（核心冒煙） |
+| 2026 | 3.4.1.7055 | 已驗證（核心冒煙） |
+| 2027 | 4.0.2.3852 | 已驗證（核心冒煙） |
+
+### 2020-2027 測試盤點
+
+| Revit 版本 | 核心冒煙（analyze -> clear -> execute -> analyze） | 進階冒煙 | 結果摘要 |
+|---|---|---|---|
+| 2020 | 通過 | 未執行 | 連線與 Code Block 建立正常 |
+| 2021 | 通過 | 未執行 | 連線與 Code Block 建立正常 |
+| 2022 | 通過 | 未執行 | 連線與 Code Block 建立正常 |
+| 2023 | 通過 | 未執行 | 連線與 Code Block 建立正常 |
+| 2024 | 通過 | 通過 | 已驗證 2點1線與 Python Script 鏈路 |
+| 2025 | 通過 | 未執行 | 連線與 Code Block 建立正常 |
+| 2026 | 通過 | 未執行 | 連線與 Code Block 建立正常 |
+| 2027 | 通過 | 未執行 | 已修正 27.0 路徑映射後恢復正常 |
+
+### 多版本安裝策略（建議）
+
+為避免預設每位使用者都安裝 Revit 2020-2027，建議分成兩種模式：
+
+1. 全矩陣模式（維護者/回歸測試）：逐版驗證 2020-2027。
+2. 偵測安裝模式（一般使用者）：只部署本機偵測到的 Revit/Dynamo 版本。
+
+常用指令：
+
+```powershell
+# 偵測安裝模式：不指定版本，deploy.ps1 會依本機已安裝版本部署
+./deploy.ps1
+
+# 指定單一版本（例如 2027）
+./deploy.ps1 -TargetDynamoVersions 4.0
+```
+
+快速安裝與低 token 互動建議請參考：
+
+- [`docs/revit-2020-2027-install-test-plan.md`](docs/revit-2020-2027-install-test-plan.md) 的「4.5 一頁式快速安裝指引」與「4.6 低 Token 互動模板」。
+
+### 注意事項
+
+1. Revit 2027 實際套件路徑為 `%AppData%\\Dynamo\\Dynamo Revit\\27.0`，不是 `4.0`。
+2. Dynamo 4.x 目標建置需要 .NET 10 SDK；若缺少 SDK，2027 將無法部署新 DLL。
+3. 只要重新部署 DLL，請先關閉 Revit/Dynamo 再部署，避免 DLL 被鎖定。
+4. UI 上有開啟 Dynamo 不等於 MCP 已連線，請以 `get_server_stats` 的 `active_sessions > 0` 判定。
+5. 若外掛已部署但選單未更新，關閉目前 Dynamo 視窗後重開一次即可載入新 extension。
+
+快速檢查本機可用版本：
+
+```powershell
+Get-ChildItem "C:\Program Files\Autodesk" -Directory | Where-Object { $_.Name -like "Revit *" }
+Get-ChildItem "$env:AppData\Dynamo\Dynamo Revit" -Directory
+```
+
 ---
 
 ## 📖 使用與控制 (Clients)
